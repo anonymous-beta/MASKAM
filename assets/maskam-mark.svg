@@ -1,11 +1,115 @@
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="28" fill="#111317"/>
-  <path d="M20 35 L39 22 L89 22 L108 35 L102 80 L83 101 L64 109 L45 101 L26 80 Z"
-        fill="#e8e6df" stroke="#777e89" stroke-width="2.5" stroke-linejoin="round"/>
-  <path d="M31 47 L56 43 L52 58 L35 63 Z" fill="#111317"/>
-  <path d="M97 47 L72 43 L76 58 L93 63 Z" fill="#111317"/>
-  <path d="M64 52 L55 75 L64 81 L73 75 Z" fill="#b9b7b0"/>
-  <path d="M64 82 Q51 76 41 86 Q53 87 64 96 Q75 87 87 86 Q77 76 64 82 Z" fill="#25272d"/>
-  <path d="M35 69 Q64 80 93 69" fill="none" stroke="#a5a29b" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" fill="none">
+  <title>MASKAM Black and Gold Mask</title>
+  <defs>
+    <linearGradient id="black" x1="70" y1="20" x2="330" y2="460" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#424242"/>
+      <stop offset=".22" stop-color="#090909"/>
+      <stop offset=".65" stop-color="#242424"/>
+      <stop offset="1" stop-color="#030303"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="100" y1="100" x2="300" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF0A0"/>
+      <stop offset=".4" stop-color="#D4AF37"/>
+      <stop offset=".7" stop-color="#F7D96B"/>
+      <stop offset="1" stop-color="#8A6818"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Sculpted mask silhouette -->
+  <path d="M42 44 Q42 15 100 12 L300 12 Q358 15 358 44
+    L366 202 Q363 310 321 371 L231 455 Q200 479 169 455
+    L79 371 Q37 310 34 202 Z"
+    fill="url(#black)" stroke="#555" stroke-width="3"/>
+
+  <!-- Forehead highlights -->
+  <path d="M58 48 Q72 24 112 25 L288 25 Q328 24 342 48
+    L335 91 Q302 58 258 58 L142 58 Q98 58 65 91 Z"
+    fill="#080808" stroke="#343434" stroke-width="3"/>
+
+  <!-- Raised eyebrows -->
+  <path d="M66 120 Q117 75 177 130 L193 153
+    Q132 117 83 140 Z" fill="url(#gold)"/>
+  <path d="M334 120 Q283 75 223 130 L207 153
+    Q268 117 317 140 Z" fill="url(#gold)"/>
+
+  <!-- Brow ridges -->
+  <path d="M62 111 Q120 63 178 119" stroke="#555" stroke-width="9" stroke-linecap="round"/>
+  <path d="M338 111 Q280 63 222 119" stroke="#555" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- Upper eye sockets -->
+  <path d="M55 157 Q112 110 168 159 L185 187
+    Q137 157 91 181 Q68 190 55 157 Z"
+    fill="#080808" stroke="#363636" stroke-width="5"/>
+  <path d="M345 157 Q288 110 232 159 L215 187
+    Q263 157 309 181 Q332 190 345 157 Z"
+    fill="#080808" stroke="#363636" stroke-width="5"/>
+
+  <!-- Eye openings -->
+  <path d="M62 190 Q110 159 164 187 Q177 198 164 210
+    Q110 225 62 202 Q54 197 62 190 Z" fill="#000"/>
+  <path d="M338 190 Q290 159 236 187 Q223 198 236 210
+    Q290 225 338 202 Q346 197 338 190 Z" fill="#000"/>
+
+  <!-- Gold lower eye contours -->
+  <path d="M54 207 Q112 237 177 209" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M346 207 Q288 237 223 209" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Cheeks -->
+  <path d="M54 226 Q88 218 111 242 L167 262
+    L137 309 Q90 301 62 271 Z"
+    fill="#161616" stroke="#333" stroke-width="3"/>
+  <path d="M346 226 Q312 218 289 242 L233 262
+    L263 309 Q310 301 338 271 Z"
+    fill="#161616" stroke="#333" stroke-width="3"/>
+
+  <!-- Nose bridge -->
+  <path d="M180 155 Q184 145 200 145 Q216 145 220 155
+    L233 250 Q230 272 211 283 L200 287 L189 283
+    Q170 272 167 250 Z"
+    fill="url(#black)" stroke="#444" stroke-width="4"/>
+  <path d="M184 253 Q200 263 216 253 L211 273
+    Q200 283 189 273 Z" fill="#030303"/>
+
+  <!-- Mustache -->
+  <path d="M194 289 Q164 265 143 279
+    Q115 299 81 277 Q92 324 139 330
+    Q173 332 200 299 Q227 332 261 330
+    Q308 324 319 277 Q285 299 257 279
+    Q236 265 206 289 L200 297 Z"
+    fill="url(#gold)" stroke="#55451A" stroke-width="4"/>
+
+  <!-- Mustache engraving -->
+  <g stroke="#8B7128" stroke-width="2.5" stroke-linecap="round">
+    <path d="M101 288 L133 311 L158 316"/>
+    <path d="M117 284 L145 305 L173 310"/>
+    <path d="M136 283 L164 299 L188 301"/>
+    <path d="M299 288 L267 311 L242 316"/>
+    <path d="M283 284 L255 305 L227 310"/>
+    <path d="M264 283 L236 299 L212 301"/>
+  </g>
+
+  <!-- Mouth and smile -->
+  <path d="M122 339 Q200 359 278 339 Q250 383 200 381
+    Q150 383 122 339 Z" fill="#050505" stroke="#444" stroke-width="4"/>
+  <path d="M151 354 Q200 364 249 354" stroke="#E7E7E7" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Chin and pointed goatee -->
+  <path d="M151 386 Q177 397 200 390 Q223 397 249 386
+    L229 432 Q215 455 200 464 Q185 455 171 432 Z"
+    fill="url(#black)" stroke="#454545" stroke-width="3"/>
+  <path d="M183 400 L200 451 L217 400
+    Q205 408 200 405 Q195 408 183 400 Z"
+    fill="url(#gold)"/>
+  <path d="M200 411 L200 447" stroke="#FFF0A0" stroke-width="2"/>
+
+  <!-- Side fasteners -->
+  <path d="M35 180 L28 185 L28 218 L36 224 Z" fill="#111" stroke="#444" stroke-width="2"/>
+  <path d="M365 180 L372 185 L372 218 L364 224 Z" fill="#111" stroke="#444" stroke-width="2"/>
+
+  <!-- Subtle sculpted highlights -->
+  <path d="M54 70 Q43 190 65 258" stroke="#777" stroke-opacity=".45" stroke-width="3"/>
+  <path d="M346 70 Q357 190 335 258" stroke="#777" stroke-opacity=".45" stroke-width="3"/>
+  <path d="M184 164 L193 250" stroke="#777" stroke-opacity=".35" stroke-width="3"/>
+  <path d="M216 164 L207 250" stroke="#777" stroke-opacity=".35" stroke-width="3"/>
 </svg>
