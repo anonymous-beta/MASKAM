@@ -1,10 +1,8 @@
 
-name: MASKAM CI
+name: MASKAM Android APK
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
     branches: [main, master]
   workflow_dispatch:
 
@@ -12,43 +10,41 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    name: Check and Build MASKAM
+  build-apk:
+    name: Build MASKAM APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: "20"
 
-      - name: Detect project configuration
-        id: project
-        shell: bash
+      - name: Check Android project
         run: |
-          if [ -f package.json ]; then
-            echo "npm_project=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "npm_project=false" >> "$GITHUB_OUTPUT"
-            echo "No root package.json found; skipping npm build."
+          if [ ! -f android/gradlew ]; then
+            echo "::error::No android/gradlew found. MASKAM needs an Android project before an APK can be built."
+            exit 1
           fi
+          chmod +x android/gradlew
 
-      - name: Install dependencies
-        if: steps.project.outputs.npm_project == 'true'
-        run: |
-          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
-            npm ci
-          else
-            npm install --no-package-lock
-          fi
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
 
-      - name: Run tests
-        if: steps.project.outputs.npm_project == 'true'
-        run: npm test --if-present
-
-      - name: Build project
-        if: steps.project.outputs.npm_project == 'true'
-        run: npm run build --if-present
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MASKAM-Android-APK
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
