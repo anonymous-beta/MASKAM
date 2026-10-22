@@ -3,9 +3,13 @@ name: Build MASKAM Android APK
 
 on:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
   pull_request:
-    branches: [main, master]
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -17,28 +21,31 @@ concurrency:
 
 jobs:
   build:
-    name: Build and verify APK
+    name: Build and verify Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
+      # 1. Get the repository source.
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Install a supported Java version.
+      # Gradle caching is configured later, after the Android project exists.
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
+      # 3. Install Node.js for Vite and Capacitor.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: npm
-          cache-dependency-path: package-lock.json
 
-      - name: Verify required project files
+      # 4. Check the required source files.
+      - name: Validate project files
         shell: bash
         run: |
           set -euo pipefail
@@ -51,15 +58,17 @@ jobs:
             capacitor.config.json
           do
             if [[ ! -s "$file" ]]; then
-              echo "::error::Required file missing or empty: $file"
+              echo "::error::Missing or empty required file: $file"
               exit 1
             fi
           done
 
+          echo "Required project files found."
           node --version
           npm --version
           java -version
 
+      # 5. Install project dependencies.
       - name: Install dependencies
         shell: bash
         run: |
@@ -68,105 +77,195 @@ jobs:
           if [[ -f package-lock.json ]]; then
             npm ci --no-audit --no-fund
           else
-            echo "::warning::package-lock.json is missing; npm install is less reproducible."
+            echo "::warning::No package-lock.json found. Installing from package.json."
             npm install --no-audit --no-fund
           fi
 
-      - name: Verify Capacitor dependencies
+      # 6. Confirm the Capacitor packages are installed.
+      - name: Verify Capacitor installation
         shell: bash
         run: |
           set -euo pipefail
-          npm ls @capacitor/core @capacitor/android @capacitor/cli
-          node --input-type=module -e \
-            "import('./capacitor.config.json', { with: { type: 'json' } }).then(({default:c}) => { if (!c.appId || !c.appName || !c.webDir) process.exit(1); console.log('Capacitor config validated:', c.appId, c.webDir); })"
 
+          npm ls @capacitor/core @capacitor/cli @capacitor/android
+
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          const config = JSON.parse(
+            readFileSync('capacitor.config.json', 'utf8')
+          );
+
+          if (!config.appId || !config.appName || !config.webDir) {
+            throw new Error(
+              'capacitor.config.json must define appId, appName and webDir.'
+            );
+          }
+
+          if (config.webDir !== 'dist') {
+            throw new Error(
+              `Expected webDir to be "dist", got "${config.webDir}".`
+            );
+          }
+
+          console.log('Capacitor configuration is valid.');
+          NODE
+
+      # 7. Build the web application.
       - name: Build web application
         run: npm run build
 
-      - name: Verify web output
+      # 8. Validate the Vite output without assuming filenames.
+      # Vite may generate hashed JS and CSS filenames.
+      - name: Verify web build output
         shell: bash
         run: |
           set -euo pipefail
 
-          test -s dist/index.html
-
-          echo "Built web assets:"
-          find dist -maxdepth 3 -type f -print
-
-          if ! grep -Eq '<script[^>]+src=' dist/index.html; then
-            echo "::error::No script entry point found in dist/index.html"
+          if [[ ! -s dist/index.html ]]; then
+            echo "::error::dist/index.html was not generated."
             exit 1
           fi
 
-          if ! grep -Eq '<link[^>]+stylesheet' dist/index.html; then
-            echo "::warning::No linked stylesheet detected in dist/index.html. Check your Vite entry configuration."
-          fi
+          echo "Generated files:"
+          find dist -maxdepth 4 -type f -print
 
-      - name: Generate Android project
+          node --input-type=module <<'NODE'
+          import {
+            readFileSync,
+            existsSync,
+            statSync
+          } from 'node:fs';
+          import path from 'node:path';
+
+          const html = readFileSync('dist/index.html', 'utf8');
+
+          const references = [
+            ...html.matchAll(
+              /<(?:script|link)\b[^>]*?\b(?:src|href)=["']([^"']+)["'][^>]*>/gi
+            )
+          ];
+
+          for (const match of references) {
+            const url = match[1];
+
+            if (
+              /^(?:https?:)?\/\//i.test(url) ||
+              /^(?:data:|mailto:|#)/i.test(url)
+            ) {
+              continue;
+            }
+
+            const pathname = decodeURIComponent(url.split(/[?#]/)[0]);
+            const target = path.resolve('dist', `.${pathname.startsWith('/') ? pathname : `/${pathname}`}`);
+
+            if (!target.startsWith(path.resolve('dist') + path.sep)) {
+              throw new Error(`Asset reference escapes dist: ${url}`);
+            }
+
+            if (!existsSync(target) || !statSync(target).isFile()) {
+              throw new Error(`Referenced build asset is missing: ${url}`);
+            }
+          }
+
+          if (!/<script\b[^>]*\bsrc=/i.test(html)) {
+            throw new Error('No external JavaScript entry point found in dist/index.html.');
+          }
+
+          console.log(`Verified ${references.length} local asset references.`);
+          NODE
+
+      # 9. Generate the native Android project when it is not committed.
+      # If android/ already exists, preserve it and sync it instead.
+      - name: Generate Android project if needed
         shell: bash
         run: |
           set -euo pipefail
 
           if [[ -d android ]]; then
-            echo "::error::An android directory already exists. This workflow generates the Android project from scratch; remove this step's generation strategy or commit and maintain the existing native project."
-            exit 1
+            echo "Existing android/ project found; keeping it."
+          else
+            npx cap add android
           fi
 
-          npx cap add android
-
-      - name: Add Android camera permission
+      # 10. Add the camera permission to the Android manifest.
+      - name: Configure Android camera permission
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
           import re
 
-          path = Path("android/app/src/main/AndroidManifest.xml")
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
 
-          if not path.is_file():
-              raise SystemExit("AndroidManifest.xml was not generated.")
-
-          text = path.read_text(encoding="utf-8")
-          permission = '<uses-permission android:name="android.permission.CAMERA" />'
-
-          if "android.permission.CAMERA" not in text:
-              updated, count = re.subn(
-                  r"(<manifest\b[^>]*>)",
-                  r"\1\n    " + permission,
-                  text,
-                  count=1,
+          if not manifest.is_file():
+              raise SystemExit(
+                  "AndroidManifest.xml is missing. "
+                  "Check Capacitor Android project generation."
               )
+
+          content = manifest.read_text(encoding="utf-8")
+          permission = (
+              '<uses-permission android:name="android.permission.CAMERA" />'
+          )
+
+          if not re.search(
+              r'<uses-permission\b[^>]*android:name=["\']android\.permission\.CAMERA["\']',
+              content
+          ):
+              updated, count = re.subn(
+                  r'(<manifest\b[^>]*>)',
+                  r'\1\n    ' + permission,
+                  content,
+                  count=1
+              )
+
               if count != 1:
-                  raise SystemExit("Could not find the manifest root element.")
-              text = updated
+                  raise SystemExit(
+                      "Could not find the opening manifest element."
+                  )
 
-          if "android.permission.CAMERA" not in text:
-              raise SystemExit("Camera permission was not added.")
+              content = updated
+              manifest.write_text(content, encoding="utf-8")
 
-          path.write_text(text, encoding="utf-8")
-          print("Camera permission verified.")
+          if "android.permission.CAMERA" not in content:
+              raise SystemExit("Failed to configure camera permission.")
+
+          print("Android camera permission is present.")
           PY
 
-      - name: Sync Capacitor
+      # 11. Copy the built web app and synchronize native plugins.
+      - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Verify Android project
+      # 12. Check the generated native project before Gradle starts.
+      - name: Validate Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          test -s android/gradlew
-          test -s android/gradle/wrapper/gradle-wrapper.properties
-          test -s android/app/src/main/AndroidManifest.xml
+          for file in \
+            android/gradlew \
+            android/gradle/wrapper/gradle-wrapper.properties \
+            android/app/src/main/AndroidManifest.xml
+          do
+            if [[ ! -s "$file" ]]; then
+              echo "::error::Missing Android build file: $file"
+              exit 1
+            fi
+          done
 
           grep -q 'android.permission.CAMERA' \
             android/app/src/main/AndroidManifest.xml
 
           chmod +x android/gradlew
 
-      - name: Configure Gradle cache
+          echo "Android project validation passed."
+
+      # 13. Configure Gradle caching only after the wrapper exists.
+      - name: Cache Gradle dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -176,10 +275,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      # 14. Compile the debug APK.
       - name: Build debug APK
         working-directory: android
         run: ./gradlew --no-daemon --stacktrace assembleDebug
 
+      # 15. Confirm that the expected APK actually exists.
       - name: Verify APK
         shell: bash
         run: |
@@ -188,14 +289,16 @@ jobs:
           APK="android/app/build/outputs/apk/debug/app-debug.apk"
 
           if [[ ! -s "$APK" ]]; then
-            echo "::error::APK was not created at $APK"
-            find android/app/build/outputs -maxdepth 5 -type f -print 2>/dev/null || true
+            echo "::error::Debug APK was not generated."
+            find android/app/build/outputs -type f -print 2>/dev/null || true
             exit 1
           fi
 
+          echo "APK generated successfully:"
           ls -lh "$APK"
           sha256sum "$APK"
 
+      # 16. Make the APK available for download from the Actions run.
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
