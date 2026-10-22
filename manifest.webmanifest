@@ -1,0 +1,19 @@
+
+{
+  "name": "MASKAM",
+  "short_name": "MASKAM",
+  "description": "A privacy-first, face-tracked virtual mask.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#090a0c",
+  "theme_color": "#090a0c",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "./assets/maskam-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
