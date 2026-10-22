@@ -5,7 +5,7 @@ const $ = (selector) => document.querySelector(selector);
 
 const video = $("#camera");
 const canvas = $("#overlay");
-const ctx = canvas.getContext("2d");
+const ctx = canvas?.getContext("2d");
 const stage = $("#stage");
 const startBtn = $("#startBtn");
 const stopBtn = $("#stopBtn");
@@ -20,17 +20,33 @@ const opacityValue = $("#opacityValue");
 const mirrorToggle = $("#mirrorToggle");
 const settingsDialog = $("#settingsDialog");
 
+if (
+  !video || !canvas || !ctx || !stage || !startBtn || !stopBtn ||
+  !flipBtn || !startBtnText || !statusMessage || !trackingBadge ||
+  !cameraLabel || !fpsLabel || !opacitySlider || !opacityValue ||
+  !mirrorToggle
+) {
+  throw new Error("MASKAM could not initialize: a required HTML element is missing.");
+}
+
 let stream = null;
 let landmarker = null;
+let modelPromise = null;
+let startPromise = null;
 let animationId = null;
 let lastVideoTime = -1;
 let facingMode = "user";
 let maskStyle = "classic";
-let maskOpacity = 0.96;
+let maskOpacity = Number(opacitySlider.value) / 100;
 let disposed = false;
-let starting = false;
-let frameCount = 0;
-let lastFpsUpdate = 0;
+let trackingError = false;
+let lastStatus = "";
+let lastInferenceTime = 0;
+let lastFpsTime = 0;
+let frames = 0;
+let fps = 0;
+
+const TARGET_INTERVAL = 1000 / 20;
 
 const MASK_STYLES = {
   classic: {
@@ -54,15 +70,32 @@ const MASK_STYLES = {
 };
 
 function setStatus(message) {
+  // Avoid repeated DOM updates on every video frame.
+  if (message === lastStatus) return;
+  lastStatus = message;
   statusMessage.textContent = message;
 }
 
 function setTrackingState(active, found = false) {
   trackingBadge.classList.toggle("active", active && found);
-  trackingBadge.innerHTML = `
-    <span class="state-dot"></span>
-    ${!active ? "STANDBY" : found ? "FACE TRACKED" : "SEARCHING"}
-  `;
+  trackingBadge.innerHTML =
+    `<span class="state-dot"></span> ${
+      !active ? "STANDBY" : found ? "FACE TRACKED" : "SEARCHING"
+    }`;
+}
+
+function setControls() {
+  const starting = Boolean(startPromise);
+
+  startBtn.disabled = starting || Boolean(stream);
+  stopBtn.disabled = !stream;
+  flipBtn.disabled = !stream || starting;
+
+  startBtnText.textContent = starting
+    ? "Starting…"
+    : stream
+      ? "Camera enabled"
+      : "Enable camera";
 }
 
 function resizeCanvas() {
@@ -90,48 +123,44 @@ function drawMask(landmarks) {
   const rect = stage.getBoundingClientRect();
   const width = rect.width;
   const height = rect.height;
-  const videoWidth = video.videoWidth;
-  const videoHeight = video.videoHeight;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
 
-  if (!videoWidth || !videoHeight || !width || !height) return;
+  if (!vw || !vh || !width || !height) return;
 
-  // Match the video element's object-fit: cover geometry.
-  const scale = Math.max(width / videoWidth, height / videoHeight);
-  const drawWidth = videoWidth * scale;
-  const drawHeight = videoHeight * scale;
-  const offsetX = (width - drawWidth) / 2;
-  const offsetY = (height - drawHeight) / 2;
+  // Align landmarks with the video's object-fit: cover display.
+  const scale = Math.max(width / vw, height / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  const ox = (width - dw) / 2;
+  const oy = (height - dh) / 2;
 
-  function mapped(index) {
-    const point = landmarks[index];
-    let x = offsetX + point.x * drawWidth;
-    const y = offsetY + point.y * drawHeight;
-
-    // Mirror the mask in the same way as the preview.
+  function point(index) {
+    const p = landmarks[index];
+    let x = ox + p.x * dw;
     if (mirrorToggle.checked) x = width - x;
-
-    return { x, y, z: point.z || 0 };
+    return { x, y: oy + p.y * dh };
   }
 
-  const forehead = mapped(10);
-  const chin = mapped(152);
-  const leftFace = mapped(234);
-  const rightFace = mapped(454);
-  const leftEye = mapped(33);
-  const rightEye = mapped(263);
-  const nose = mapped(1);
-  const mouthLeft = mapped(61);
-  const mouthRight = mapped(291);
-  const mouthBottom = mapped(14);
+  const forehead = point(10);
+  const chin = point(152);
+  const leftFace = point(234);
+  const rightFace = point(454);
+  const leftEye = point(33);
+  const rightEye = point(263);
+  const nose = point(1);
+  const mouthLeft = point(61);
+  const mouthRight = point(291);
+  const mouthBottom = point(14);
 
   const faceWidth = distance(leftFace, rightFace);
   if (!Number.isFinite(faceWidth) || faceWidth < 25) return;
 
   const style = MASK_STYLES[maskStyle];
-  const eyeMidX = (leftEye.x + rightEye.x) / 2;
-  const eyeMidY = (leftEye.y + rightEye.y) / 2;
+  const eyeX = (leftEye.x + rightEye.x) / 2;
+  const eyeY = (leftEye.y + rightEye.y) / 2;
   const eyeDistance = distance(leftEye, rightEye);
-  const cheekY = eyeMidY + faceWidth * 0.19;
+  const cheekY = eyeY + faceWidth * 0.19;
   const lowerY = chin.y - faceWidth * 0.02;
   const halfWidth = faceWidth * 0.53;
   const templeY = forehead.y + faceWidth * 0.28;
@@ -141,64 +170,49 @@ function drawMask(landmarks) {
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
-  // Sculpted Anonymous-inspired mask silhouette.
+  // Classic sculpted mask silhouette.
   ctx.beginPath();
-  ctx.moveTo(eyeMidX - halfWidth * 0.91, templeY);
+  ctx.moveTo(eyeX - halfWidth * 0.91, templeY);
   ctx.quadraticCurveTo(
-    eyeMidX - halfWidth * 0.74,
-    eyeMidY - faceWidth * 0.05,
-    eyeMidX - eyeDistance * 0.48,
-    eyeMidY - faceWidth * 0.02
+    eyeX - halfWidth * 0.74, eyeY - faceWidth * 0.05,
+    eyeX - eyeDistance * 0.48, eyeY - faceWidth * 0.02
   );
   ctx.lineTo(nose.x - faceWidth * 0.055, nose.y + faceWidth * 0.08);
   ctx.quadraticCurveTo(
-    nose.x,
-    nose.y + faceWidth * 0.15,
-    nose.x + faceWidth * 0.055,
-    nose.y + faceWidth * 0.08
+    nose.x, nose.y + faceWidth * 0.15,
+    nose.x + faceWidth * 0.055, nose.y + faceWidth * 0.08
   );
-  ctx.lineTo(eyeMidX + eyeDistance * 0.48, eyeMidY - faceWidth * 0.02);
+  ctx.lineTo(eyeX + eyeDistance * 0.48, eyeY - faceWidth * 0.02);
   ctx.quadraticCurveTo(
-    eyeMidX + halfWidth * 0.74,
-    eyeMidY - faceWidth * 0.05,
-    eyeMidX + halfWidth * 0.91,
-    templeY
+    eyeX + halfWidth * 0.74, eyeY - faceWidth * 0.05,
+    eyeX + halfWidth * 0.91, templeY
   );
   ctx.quadraticCurveTo(
-    rightFace.x + faceWidth * 0.02,
-    cheekY,
-    eyeMidX + halfWidth * 0.66,
-    lowerY - faceWidth * 0.16
+    rightFace.x + faceWidth * 0.02, cheekY,
+    eyeX + halfWidth * 0.66, lowerY - faceWidth * 0.16
   );
   ctx.quadraticCurveTo(
-    eyeMidX,
-    lowerY + faceWidth * 0.08,
-    eyeMidX - halfWidth * 0.66,
-    lowerY - faceWidth * 0.16
+    eyeX, lowerY + faceWidth * 0.08,
+    eyeX - halfWidth * 0.66, lowerY - faceWidth * 0.16
   );
   ctx.quadraticCurveTo(
-    leftFace.x - faceWidth * 0.02,
-    cheekY,
-    eyeMidX - halfWidth * 0.91,
-    templeY
+    leftFace.x - faceWidth * 0.02, cheekY,
+    eyeX - halfWidth * 0.91, templeY
   );
   ctx.closePath();
 
   ctx.fillStyle = style.fill;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.2, faceWidth * 0.012);
   ctx.strokeStyle = style.stroke;
+  ctx.lineWidth = Math.max(1.2, faceWidth * 0.012);
   ctx.stroke();
 
-  const gradient = ctx.createLinearGradient(
-    eyeMidX, eyeMidY, eyeMidX, lowerY
-  );
+  const gradient = ctx.createLinearGradient(eyeX, eyeY, eyeX, lowerY);
   gradient.addColorStop(0, "#ffffff18");
   gradient.addColorStop(1, "#00000020");
   ctx.fillStyle = gradient;
   ctx.fill();
 
-  // Eye openings.
   const eyeWidth = Math.max(12, eyeDistance * 0.39);
   const eyeHeight = Math.max(7, faceWidth * 0.073);
 
@@ -212,10 +226,12 @@ function drawMask(landmarks) {
       -eyeWidth * 0.2, -eyeHeight * 0.75, 0, -eyeHeight * 0.2
     );
     ctx.quadraticCurveTo(
-      eyeWidth * 0.28, -eyeHeight * 0.55, eyeWidth * 0.58, 0
+      eyeWidth * 0.28, -eyeHeight * 0.55,
+      eyeWidth * 0.58, 0
     );
     ctx.quadraticCurveTo(
-      eyeWidth * 0.22, eyeHeight * 0.7, 0, eyeHeight * 0.18
+      eyeWidth * 0.22, eyeHeight * 0.7,
+      0, eyeHeight * 0.18
     );
     ctx.quadraticCurveTo(
       -eyeWidth * 0.28, eyeHeight * 0.6,
@@ -224,8 +240,8 @@ function drawMask(landmarks) {
     ctx.closePath();
     ctx.fillStyle = "#08090c";
     ctx.fill();
-    ctx.lineWidth = Math.max(1, faceWidth * 0.009);
     ctx.strokeStyle = style.features;
+    ctx.lineWidth = Math.max(1, faceWidth * 0.009);
     ctx.stroke();
     ctx.restore();
   }
@@ -249,59 +265,55 @@ function drawMask(landmarks) {
   ctx.lineWidth = Math.max(1, faceWidth * 0.01);
   ctx.stroke();
 
-  // Characteristic moustache.
-  const mouthCenter = {
+  // Two halves of the signature moustache.
+  const mouth = {
     x: (mouthLeft.x + mouthRight.x) / 2,
     y: (mouthLeft.y + mouthRight.y) / 2
   };
-
-  const moustacheY = mouthCenter.y - faceWidth * 0.015;
+  const moustacheY = mouth.y - faceWidth * 0.015;
   const moustacheHalf = faceWidth * 0.20;
 
   ctx.fillStyle = style.features;
 
   for (const direction of [-1, 1]) {
     ctx.beginPath();
-    ctx.moveTo(mouthCenter.x, moustacheY);
+    ctx.moveTo(mouth.x, moustacheY);
     ctx.bezierCurveTo(
-      mouthCenter.x + direction * moustacheHalf * 0.55,
+      mouth.x + direction * moustacheHalf * 0.55,
       moustacheY - faceWidth * 0.10,
-      mouthCenter.x + direction * moustacheHalf * 1.05,
+      mouth.x + direction * moustacheHalf * 1.05,
       moustacheY - faceWidth * 0.02,
-      mouthCenter.x + direction * moustacheHalf * 1.10,
+      mouth.x + direction * moustacheHalf * 1.10,
       moustacheY + faceWidth * 0.055
     );
     ctx.bezierCurveTo(
-      mouthCenter.x + direction * moustacheHalf * 0.68,
+      mouth.x + direction * moustacheHalf * 0.68,
       moustacheY + faceWidth * 0.035,
-      mouthCenter.x + direction * moustacheHalf * 0.27,
+      mouth.x + direction * moustacheHalf * 0.27,
       moustacheY + faceWidth * 0.11,
-      mouthCenter.x,
+      mouth.x,
       moustacheY + faceWidth * 0.075
     );
     ctx.closePath();
     ctx.fill();
   }
 
-  // Smile detail.
+  // Smile and lower accent.
   ctx.beginPath();
   ctx.moveTo(mouthLeft.x, mouthBottom.y + faceWidth * 0.025);
   ctx.quadraticCurveTo(
-    mouthCenter.x,
-    mouthBottom.y + faceWidth * 0.09,
-    mouthRight.x,
-    mouthBottom.y + faceWidth * 0.025
+    mouth.x, mouthBottom.y + faceWidth * 0.09,
+    mouthRight.x, mouthBottom.y + faceWidth * 0.025
   );
   ctx.strokeStyle = style.stroke;
   ctx.lineWidth = Math.max(1.2, faceWidth * 0.014);
   ctx.stroke();
 
-  // Lower accent line.
   ctx.beginPath();
-  ctx.moveTo(eyeMidX - halfWidth * 0.5, lowerY - faceWidth * 0.08);
+  ctx.moveTo(eyeX - halfWidth * 0.5, lowerY - faceWidth * 0.08);
   ctx.quadraticCurveTo(
-    eyeMidX, lowerY + faceWidth * 0.01,
-    eyeMidX + halfWidth * 0.5, lowerY - faceWidth * 0.08
+    eyeX, lowerY + faceWidth * 0.01,
+    eyeX + halfWidth * 0.5, lowerY - faceWidth * 0.08
   );
   ctx.strokeStyle = style.accent;
   ctx.lineWidth = Math.max(1, faceWidth * 0.008);
@@ -312,189 +324,203 @@ function drawMask(landmarks) {
 
 async function loadFaceLandmarker() {
   if (landmarker) return landmarker;
+  if (modelPromise) return modelPromise;
 
-  setStatus(
-    "Camera connected. Loading the on-device tracking model; first load requires internet."
-  );
+  modelPromise = (async () => {
+    setStatus("Loading the face-tracking model. Internet is required for the first load.");
 
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
-  );
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+    );
 
-  landmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-      // CPU is more compatible with Android WebView devices.
-      delegate: "CPU"
-    },
-    runningMode: "VIDEO",
-    numFaces: 1,
-    minFaceDetectionConfidence: 0.5,
-    minFacePresenceConfidence: 0.5,
-    minTrackingConfidence: 0.5,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: false
-  });
+    const tracker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath:
+          "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "CPU"
+      },
+      runningMode: "VIDEO",
+      numFaces: 1,
+      minFaceDetectionConfidence: 0.5,
+      minFacePresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+      outputFaceBlendshapes: false,
+      outputFacialTransformationMatrixes: false
+    });
 
-  return landmarker;
+    landmarker = tracker;
+    return tracker;
+  })();
+
+  try {
+    return await modelPromise;
+  } catch (error) {
+    // Permit a later retry instead of caching a rejected promise forever.
+    modelPromise = null;
+    throw error;
+  }
 }
 
-function getCameraError(error) {
+function friendlyError(error) {
   const name = error?.name || "";
   const message = String(error?.message || "");
 
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-    return "Camera permission was denied. Allow camera access for MASKAM in Android app settings, then try again.";
+    return "Camera permission was denied. Allow camera access in Android settings and retry.";
   }
 
   if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-    return "No compatible camera was found on this device.";
+    return "No compatible camera was found.";
   }
 
   if (name === "NotReadableError" || name === "TrackStartError") {
-    return "The camera is busy or unavailable. Close other camera apps and retry.";
+    return "The camera is busy. Close other camera apps and try again.";
   }
 
   if (name === "OverconstrainedError") {
-    return "The requested camera mode is unsupported. Try again or switch cameras.";
-  }
-
-  if (name === "SecurityError") {
-    return "The app or browser blocked camera access. Use the installed app or an HTTPS website.";
+    return "This camera does not support the requested settings. Try again.";
   }
 
   if (/fetch|network|wasm|model|http/i.test(message)) {
-    return "The camera may be available, but the tracking model could not load. Check your internet connection and retry.";
+    return "The camera may work, but the tracking model failed to load. Check your internet connection and retry.";
   }
 
-  return `MASKAM could not start: ${message || name || "unknown error"}. Check camera permission and internet access, then retry.`;
+  return `Unable to start MASKAM: ${message || name || "unknown error"}.`;
 }
 
 async function startCamera() {
-  if (starting || stream) return;
+  if (startPromise || stream) return startPromise;
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus(
-      "Camera access is unavailable in this context. Open MASKAM through the installed app or a secure HTTPS website."
-    );
+    setStatus("Camera access needs the installed app or a secure HTTPS website.");
     return;
   }
 
-  starting = true;
-  startBtn.disabled = true;
-  stopBtn.disabled = true;
-  flipBtn.disabled = true;
-  startBtnText.textContent = "Starting…";
-  setStatus("Requesting camera access…");
+  const attempt = (async () => {
+    startBtn.disabled = true;
+    stopBtn.disabled = true;
+    flipBtn.disabled = true;
+    startBtnText.textContent = "Starting…";
+    setStatus("Requesting camera access…");
 
-  let candidateStream = null;
+    let candidate = null;
+
+    try {
+      // Ask for the camera first. Do not make camera permission depend
+      // on whether the tracking model loads.
+      candidate = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 24, max: 30 }
+        }
+      });
+
+      stream = candidate;
+      video.srcObject = candidate;
+      video.muted = true;
+      video.playsInline = true;
+
+      await video.play();
+
+      if (!video.videoWidth) {
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error("Camera video did not start in time."));
+          }, 10000);
+
+          function onReady() {
+            cleanup();
+            resolve();
+          }
+
+          function cleanup() {
+            clearTimeout(timeout);
+            video.removeEventListener("loadedmetadata", onReady);
+          }
+
+          video.addEventListener("loadedmetadata", onReady, { once: true });
+        });
+      }
+
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error("The camera opened without producing video.");
+      }
+
+      stage.classList.add("has-camera");
+      resizeCanvas();
+      cameraLabel.textContent = "CAMERA ONLINE";
+      setStatus("Camera connected. Preparing local face tracking…");
+
+      // A failed model load should not silently leave dead controls.
+      // The catch below stops the stream and provides a useful message.
+      await loadFaceLandmarker();
+
+      if (stream !== candidate) return;
+
+      disposed = false;
+      trackingError = false;
+      lastVideoTime = -1;
+      lastInferenceTime = 0;
+      lastFpsTime = performance.now();
+      frames = 0;
+
+      setTrackingState(true, false);
+      setStatus("Ready. Move into the frame to align your mask.");
+      trackFrame();
+    } catch (error) {
+      console.error("MASKAM startup error:", error);
+
+      if (candidate) {
+        candidate.getTracks().forEach((track) => track.stop());
+      }
+
+      if (stream === candidate) stream = null;
+
+      video.pause();
+      video.srcObject = null;
+      stage.classList.remove("has-camera");
+      clearCanvas();
+
+      cameraLabel.textContent = "CAMERA OFFLINE";
+      fpsLabel.textContent = "-- FPS";
+      setTrackingState(false, false);
+      setStatus(friendlyError(error));
+    } finally {
+      setControls();
+    }
+  })();
+
+  startPromise = attempt;
 
   try {
-    // Request the camera FIRST, so model download failures do not hide
-    // camera permission errors.
-    candidateStream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: { ideal: facingMode },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30 }
-      }
-    });
-
-    stream = candidateStream;
-    video.srcObject = stream;
-    video.muted = true;
-    video.playsInline = true;
-
-    await video.play();
-
-    if (video.videoWidth === 0 || video.videoHeight === 0) {
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          cleanup();
-          reject(new Error("Timed out waiting for camera video."));
-        }, 10000);
-
-        function onMetadata() {
-          cleanup();
-          resolve();
-        }
-
-        function cleanup() {
-          clearTimeout(timeout);
-          video.removeEventListener("loadedmetadata", onMetadata);
-        }
-
-        video.addEventListener("loadedmetadata", onMetadata, { once: true });
-      });
-    }
-
-    if (!video.videoWidth || !video.videoHeight) {
-      throw new Error("The camera opened but returned no video frames.");
-    }
-
-    stage.classList.add("has-camera");
-    resizeCanvas();
-
-    cameraLabel.textContent = "CAMERA ONLINE";
-    setStatus("Camera connected. Initializing local face tracking…");
-
-    // A camera can work even when the model fails. We now report that
-    // failure accurately and cleanly release the camera.
-    await loadFaceLandmarker();
-
-    disposed = false;
-    lastVideoTime = -1;
-    frameCount = 0;
-    lastFpsUpdate = performance.now();
-
-    stopBtn.disabled = false;
-    flipBtn.disabled = false;
-    startBtnText.textContent = "Camera enabled";
-    setTrackingState(true, false);
-    setStatus("Face tracker ready. Move into the frame to align your mask.");
-
-    trackFrame();
-  } catch (error) {
-    console.error("MASKAM camera/tracking startup error:", error);
-
-    // Stop any stream opened during this attempt.
-    if (candidateStream) {
-      candidateStream.getTracks().forEach((track) => track.stop());
-    }
-
-    if (stream === candidateStream) stream = null;
-
-    video.pause();
-    video.srcObject = null;
-    stage.classList.remove("has-camera");
-    clearCanvas();
-
-    cameraLabel.textContent = "CAMERA OFFLINE";
-    fpsLabel.textContent = "-- FPS";
-    setTrackingState(false, false);
-    setStatus(getCameraError(error));
+    await attempt;
   } finally {
-    starting = false;
-    startBtn.disabled = false;
-    startBtnText.textContent = stream ? "Camera enabled" : "Enable camera";
-    stopBtn.disabled = !stream;
-    flipBtn.disabled = !stream;
+    startPromise = null;
+    setControls();
   }
 }
 
 function trackFrame() {
-  if (!stream || disposed || !landmarker) return;
+  if (disposed || !stream || !landmarker) return;
 
   animationId = requestAnimationFrame(trackFrame);
 
+  if (document.hidden) return;
   if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
   if (video.currentTime === lastVideoTime) return;
 
-  lastVideoTime = video.currentTime;
   const now = performance.now();
+
+  // Limit inference frequency so the UI has time to process taps and
+  // control updates on mid-range Android phones.
+  if (now - lastInferenceTime < TARGET_INTERVAL) return;
+
+  lastInferenceTime = now;
+  lastVideoTime = video.currentTime;
 
   try {
     const result = landmarker.detectForVideo(video, now);
@@ -510,21 +536,25 @@ function trackFrame() {
       setTrackingState(true, false);
       setStatus("Searching for a face. Move into view and face the camera.");
     }
+
+    trackingError = false;
   } catch (error) {
-    console.error("MASKAM face-tracking error:", error);
-    setStatus("Face tracking encountered an error. Stop and restart the camera.");
+    console.error("MASKAM tracking error:", error);
+    trackingError = true;
+    setTrackingState(true, false);
+    setStatus("Tracking stopped after an error. Stop the camera and try again.");
+    cancelAnimationFrame(animationId);
+    animationId = null;
+    return;
   }
 
-  frameCount++;
+  frames++;
 
-  if (now - lastFpsUpdate >= 1000) {
-    const fps = Math.round(
-      (frameCount * 1000) / (now - lastFpsUpdate)
-    );
-
+  if (now - lastFpsTime >= 1000) {
+    fps = Math.round((frames * 1000) / (now - lastFpsTime));
     fpsLabel.textContent = `${fps} FPS`;
-    frameCount = 0;
-    lastFpsUpdate = now;
+    frames = 0;
+    lastFpsTime = now;
   }
 }
 
@@ -544,26 +574,20 @@ function stopCamera() {
   stream = null;
   video.pause();
   video.srcObject = null;
-
   stage.classList.remove("has-camera");
   clearCanvas();
 
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  flipBtn.disabled = true;
-  startBtnText.textContent = "Enable camera";
   cameraLabel.textContent = "CAMERA OFFLINE";
   fpsLabel.textContent = "-- FPS";
-
   setTrackingState(false, false);
   setStatus("Camera is off. Nothing is being captured.");
+  setControls();
 }
 
 async function flipCamera() {
-  if (!stream || starting) return;
+  if (!stream || startPromise) return;
 
   const nextFacing = facingMode === "user" ? "environment" : "user";
-
   stopCamera();
   facingMode = nextFacing;
   await startCamera();
@@ -581,9 +605,20 @@ function setMaskStyle(style) {
   });
 }
 
-startBtn.addEventListener("click", startCamera);
+startBtn.addEventListener("click", () => {
+  startCamera().catch((error) => {
+    console.error("MASKAM start button error:", error);
+    setStatus(friendlyError(error));
+  });
+});
+
 stopBtn.addEventListener("click", stopCamera);
-flipBtn.addEventListener("click", flipCamera);
+flipBtn.addEventListener("click", () => {
+  flipCamera().catch((error) => {
+    console.error("MASKAM camera switch error:", error);
+    setStatus(friendlyError(error));
+  });
+});
 
 document.querySelectorAll(".mask-option").forEach((button) => {
   button.addEventListener("click", () => setMaskStyle(button.dataset.mask));
@@ -597,29 +632,60 @@ opacitySlider.addEventListener("input", () => {
 
 mirrorToggle.addEventListener("change", () => {
   video.style.transform = mirrorToggle.checked ? "scaleX(-1)" : "none";
-  if (stream) resizeCanvas();
+  clearCanvas();
 });
 
-$("#settingsBtn").addEventListener("click", () => {
-  if (typeof settingsDialog.showModal === "function") {
-    settingsDialog.showModal();
+function openSettings() {
+  if (!settingsDialog) {
+    setStatus("Settings are unavailable in this version.");
+    return;
   }
-});
 
-$("#closeSettingsBtn").addEventListener("click", () => {
-  settingsDialog.close();
-});
+  if (typeof settingsDialog.showModal === "function") {
+    if (!settingsDialog.open) settingsDialog.showModal();
+  } else {
+    // Fallback for WebViews without the native dialog API.
+    settingsDialog.setAttribute("open", "");
+  }
+}
 
-$("#doneSettingsBtn").addEventListener("click", () => {
-  settingsDialog.close();
-});
+function closeSettings() {
+  if (!settingsDialog) return;
 
-window.addEventListener("resize", () => {
-  resizeCanvas();
+  if (typeof settingsDialog.close === "function") {
+    if (settingsDialog.open) settingsDialog.close();
+  } else {
+    settingsDialog.removeAttribute("open");
+  }
+}
+
+$("#settingsBtn")?.addEventListener("click", openSettings);
+$("#closeSettingsBtn")?.addEventListener("click", closeSettings);
+$("#doneSettingsBtn")?.addEventListener("click", closeSettings);
+
+window.addEventListener("resize", resizeCanvas);
+
+// Pause inference when the app is backgrounded, but don't automatically
+// stop the camera merely because the browser temporarily hides the page.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && stream) {
+    lastVideoTime = -1;
+    lastInferenceTime = 0;
+    resizeCanvas();
+  }
 });
 
 window.addEventListener("pagehide", stopCamera);
 
 video.style.transform = mirrorToggle.checked ? "scaleX(-1)" : "none";
-setMaskStyle("classic");
+
+document.querySelectorAll(".mask-option").forEach((button) => {
+  button.setAttribute(
+    "aria-pressed",
+    String(button.dataset.mask === "classic")
+  );
+});
+
+setControls();
+setTrackingState(false, false);
 resizeCanvas();
