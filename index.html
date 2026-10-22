@@ -1,0 +1,149 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090a0c">
+  <meta name="description" content="MASKAM — a privacy-first, real-time face-tracked virtual mask.">
+  <title>MASKAM — Wear Another Face</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/assets/maskam-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="MASKAM home">
+        <img src="/assets/maskam-mark.svg" alt="" class="brand-mark">
+        <span>MASK<span class="brand-light">AM</span></span>
+      </a>
+      <div class="topbar-right">
+        <span class="privacy-chip"><span class="status-dot"></span> LOCAL PROCESSING</span>
+        <button id="settingsBtn" class="icon-button" aria-label="Open settings" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="intro">
+        <div class="eyebrow"><span class="eyebrow-line"></span> YOUR FACE. YOUR CONTROL.</div>
+        <h1>Wear another <span>face.</span></h1>
+        <p class="intro-copy">A classic mask, tracked in real time. Your camera feed stays on your device while the effect is running.</p>
+      </section>
+
+      <section class="studio">
+        <div class="studio-heading">
+          <div>
+            <div class="section-kicker">01 / LIVE STUDIO</div>
+            <h2>Mask interface</h2>
+          </div>
+          <span id="trackingBadge" class="state-badge"><span class="state-dot"></span> STANDBY</span>
+        </div>
+
+        <div id="stage" class="stage">
+          <video id="camera" autoplay muted playsinline></video>
+          <canvas id="overlay" aria-label="Face mask overlay"></canvas>
+
+          <div id="stageEmpty" class="stage-empty">
+            <div class="scan-emblem">
+              <img src="/assets/maskam-mark.svg" alt="" />
+            </div>
+            <p class="stage-title">Your studio is waiting</p>
+            <p class="stage-subtitle">Enable your camera to begin face tracking.</p>
+          </div>
+
+          <div class="stage-corner corner-tl"></div>
+          <div class="stage-corner corner-tr"></div>
+          <div class="stage-corner corner-bl"></div>
+          <div class="stage-corner corner-br"></div>
+
+          <div class="stage-meta">
+            <span id="cameraLabel">CAMERA OFFLINE</span>
+            <span id="fpsLabel">-- FPS</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="startBtn" class="primary-button">
+            <span class="button-icon">◉</span>
+            <span id="startBtnText">Enable camera</span>
+          </button>
+          <button id="stopBtn" class="secondary-button" disabled>Stop</button>
+          <button id="flipBtn" class="secondary-button" disabled>Flip camera</button>
+        </div>
+
+        <p id="statusMessage" class="status-message" role="status" aria-live="polite">Camera is off. Nothing is being captured.</p>
+      </section>
+
+      <section class="customize">
+        <div class="section-kicker">02 / APPEARANCE</div>
+        <h2>Make it yours.</h2>
+        <div class="option-grid">
+          <button class="mask-option selected" data-mask="classic">
+            <span class="option-preview classic-preview">◡</span>
+            <span class="option-name">Classic</span>
+            <span class="option-desc">White mask</span>
+          </button>
+          <button class="mask-option" data-mask="noir">
+            <span class="option-preview noir-preview">◡</span>
+            <span class="option-name">Noir</span>
+            <span class="option-desc">Dark mask</span>
+          </button>
+          <button class="mask-option" data-mask="crimson">
+            <span class="option-preview crimson-preview">◡</span>
+            <span class="option-name">Crimson</span>
+            <span class="option-desc">Red accent</span>
+          </button>
+        </div>
+
+        <div class="slider-row">
+          <div>
+            <label for="opacitySlider">Mask opacity</label>
+            <p>Adjust the overlay strength.</p>
+          </div>
+          <output id="opacityValue" for="opacitySlider">96%</output>
+        </div>
+        <input id="opacitySlider" type="range" min="35" max="100" value="96">
+        <label class="toggle-row" for="mirrorToggle">
+          <span><strong>Mirror preview</strong><small>Flip the preview like a selfie camera.</small></span>
+          <input id="mirrorToggle" type="checkbox" checked>
+          <span class="toggle-track"></span>
+        </label>
+      </section>
+
+      <section class="privacy-section">
+        <div class="privacy-icon">⌁</div>
+        <div>
+          <h3>Privacy is the default.</h3>
+          <p>Face landmarks are processed on-device. MASKAM does not upload your camera feed to a MASKAM server. Camera access requires your permission.</p>
+        </div>
+      </section>
+
+      <footer>
+        <a class="brand footer-brand" href="#"><img src="/assets/maskam-mark.svg" alt=""> MASKAM</a>
+        <span>Created by <strong>Anonymous-beta (Chinedu)</strong></span>
+        <span class="footer-version">EARLY ACCESS · v1.0.0</span>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="settingsDialog" class="settings-dialog">
+    <div class="dialog-header">
+      <div>
+        <div class="section-kicker">PREFERENCES</div>
+        <h2>Settings</h2>
+      </div>
+      <button id="closeSettingsBtn" class="icon-button" aria-label="Close settings">✕</button>
+    </div>
+    <p>MASKAM runs face tracking in your browser or app. Camera access is controlled by your device and browser permissions.</p>
+    <div class="settings-info">
+      <span>Face tracking</span><strong>On-device</strong>
+      <span>Camera upload</span><strong>Not used by this app</strong>
+      <span>Virtual webcam</span><strong>Not available yet</strong>
+    </div>
+    <button id="doneSettingsBtn" class="primary-button full-button">Done</button>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
