@@ -22,9 +22,21 @@ const settingsDialog = $("#settingsDialog");
 const stageEmpty = $("#stageEmpty");
 
 const required = {
-  video, canvas, ctx, stage, startBtn, stopBtn, flipBtn,
-  startBtnText, statusMessage, trackingBadge, cameraLabel,
-  fpsLabel, opacitySlider, opacityValue, mirrorToggle
+  video,
+  canvas,
+  ctx,
+  stage,
+  startBtn,
+  stopBtn,
+  flipBtn,
+  startBtnText,
+  statusMessage,
+  trackingBadge,
+  cameraLabel,
+  fpsLabel,
+  opacitySlider,
+  opacityValue,
+  mirrorToggle
 };
 
 for (const [name, element] of Object.entries(required)) {
@@ -33,9 +45,15 @@ for (const [name, element] of Object.entries(required)) {
   }
 }
 
-const MODEL_VERSION = "0.10.22";
+/*
+ * Keep this version aligned with package.json:
+ * "@mediapipe/tasks-vision": "0.10.35"
+ */
+const MODEL_VERSION = "0.10.35";
+
 const WASM_URL =
   `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MODEL_VERSION}/wasm`;
+
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
@@ -84,6 +102,7 @@ let resizeObserver = null;
 
 function setStatus(message) {
   if (message === lastStatus) return;
+
   lastStatus = message;
   statusMessage.textContent = message;
 }
@@ -100,7 +119,10 @@ function setTrackingState(active, found = false) {
   const dot = document.createElement("span");
   dot.className = "state-dot";
 
-  trackingBadge.replaceChildren(dot, document.createTextNode(` ${label}`));
+  trackingBadge.replaceChildren(
+    dot,
+    document.createTextNode(` ${label}`)
+  );
 }
 
 function setControls(starting = false) {
@@ -154,9 +176,16 @@ function distance(a, b) {
 }
 
 function smoothLandmarks(points) {
-  if (!smoothedLandmarks ||
-      smoothedLandmarks.length !== points.length) {
-    smoothedLandmarks = points.map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }));
+  if (
+    !smoothedLandmarks ||
+    smoothedLandmarks.length !== points.length
+  ) {
+    smoothedLandmarks = points.map((p) => ({
+      x: p.x,
+      y: p.y,
+      z: p.z || 0
+    }));
+
     return smoothedLandmarks;
   }
 
@@ -182,6 +211,7 @@ function drawMask(landmarks) {
 
   if (!vw || !vh || !width || !height) return;
 
+  // Match the usual CSS object-fit: cover camera presentation.
   const scale = Math.max(width / vw, height / vh);
   const dw = vw * scale;
   const dh = vh * scale;
@@ -193,9 +223,14 @@ function drawMask(landmarks) {
     const p = landmarks[index];
     let x = ox + p.x * dw;
 
-    if (mirrored) x = width - x;
+    if (mirrored) {
+      x = width - x;
+    }
 
-    return { x, y: oy + p.y * dh };
+    return {
+      x,
+      y: oy + p.y * dh
+    };
   }
 
   const forehead = point(10);
@@ -230,7 +265,7 @@ function drawMask(landmarks) {
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
-  // Sculpted outer mask.
+  // Main sculpted mask silhouette.
   ctx.beginPath();
   ctx.moveTo(eyeX - halfWidth * 0.91, templeY);
 
@@ -241,7 +276,10 @@ function drawMask(landmarks) {
     eyeY - faceWidth * 0.02
   );
 
-  ctx.lineTo(nose.x - faceWidth * 0.055, nose.y + faceWidth * 0.08);
+  ctx.lineTo(
+    nose.x - faceWidth * 0.055,
+    nose.y + faceWidth * 0.08
+  );
 
   ctx.quadraticCurveTo(
     nose.x,
@@ -250,7 +288,10 @@ function drawMask(landmarks) {
     nose.y + faceWidth * 0.08
   );
 
-  ctx.lineTo(eyeX + eyeDistance * 0.48, eyeY - faceWidth * 0.02);
+  ctx.lineTo(
+    eyeX + eyeDistance * 0.48,
+    eyeY - faceWidth * 0.02
+  );
 
   ctx.quadraticCurveTo(
     eyeX + halfWidth * 0.74,
@@ -283,20 +324,29 @@ function drawMask(landmarks) {
   ctx.closePath();
   ctx.fillStyle = style.fill;
   ctx.fill();
+
   ctx.strokeStyle = style.stroke;
   ctx.lineWidth = Math.max(1.2, faceWidth * 0.012);
   ctx.stroke();
 
-  // Subtle surface shading.
-  const gradient = ctx.createLinearGradient(eyeX, eyeY, eyeX, lowerY);
+  // Gentle shading for depth.
+  const gradient = ctx.createLinearGradient(
+    eyeX,
+    eyeY,
+    eyeX,
+    lowerY
+  );
+
   gradient.addColorStop(0, "#ffffff18");
   gradient.addColorStop(1, "#00000020");
+
   ctx.fillStyle = gradient;
   ctx.fill();
 
-  // Eye openings follow the measured eye-line angle.
+  // Eye openings follow the detected eye-line angle.
   const eyeWidth = Math.max(12, eyeDistance * 0.39);
   const eyeHeight = Math.max(7, faceWidth * 0.073);
+
   const eyeAngle = Math.atan2(
     rightEye.y - leftEye.y,
     rightEye.x - leftEye.x
@@ -304,38 +354,53 @@ function drawMask(landmarks) {
 
   function drawEye(center) {
     ctx.save();
-    ctx.translate(center.x, center.y + faceWidth * 0.025);
+
+    ctx.translate(
+      center.x,
+      center.y + faceWidth * 0.025
+    );
+
     ctx.rotate(eyeAngle);
 
     ctx.beginPath();
     ctx.moveTo(-eyeWidth * 0.58, -eyeHeight * 0.12);
 
     ctx.quadraticCurveTo(
-      -eyeWidth * 0.2, -eyeHeight * 0.75,
-      0, -eyeHeight * 0.2
+      -eyeWidth * 0.2,
+      -eyeHeight * 0.75,
+      0,
+      -eyeHeight * 0.2
     );
 
     ctx.quadraticCurveTo(
-      eyeWidth * 0.28, -eyeHeight * 0.55,
-      eyeWidth * 0.58, 0
+      eyeWidth * 0.28,
+      -eyeHeight * 0.55,
+      eyeWidth * 0.58,
+      0
     );
 
     ctx.quadraticCurveTo(
-      eyeWidth * 0.22, eyeHeight * 0.7,
-      0, eyeHeight * 0.18
+      eyeWidth * 0.22,
+      eyeHeight * 0.7,
+      0,
+      eyeHeight * 0.18
     );
 
     ctx.quadraticCurveTo(
-      -eyeWidth * 0.28, eyeHeight * 0.6,
-      -eyeWidth * 0.58, -eyeHeight * 0.12
+      -eyeWidth * 0.28,
+      eyeHeight * 0.6,
+      -eyeWidth * 0.58,
+      -eyeHeight * 0.12
     );
 
     ctx.closePath();
     ctx.fillStyle = "#08090c";
     ctx.fill();
+
     ctx.strokeStyle = style.features;
     ctx.lineWidth = Math.max(1, faceWidth * 0.009);
     ctx.stroke();
+
     ctx.restore();
   }
 
@@ -344,7 +409,11 @@ function drawMask(landmarks) {
 
   // Nose detail.
   ctx.beginPath();
-  ctx.moveTo(nose.x - faceWidth * 0.075, nose.y + faceWidth * 0.13);
+
+  ctx.moveTo(
+    nose.x - faceWidth * 0.075,
+    nose.y + faceWidth * 0.13
+  );
 
   ctx.quadraticCurveTo(
     nose.x,
@@ -391,7 +460,10 @@ function drawMask(landmarks) {
 
   // Mouth contour.
   ctx.beginPath();
-  ctx.moveTo(mouthLeft.x, mouthBottom.y + faceWidth * 0.025);
+  ctx.moveTo(
+    mouthLeft.x,
+    mouthBottom.y + faceWidth * 0.025
+  );
 
   ctx.quadraticCurveTo(
     mouthX,
@@ -406,7 +478,11 @@ function drawMask(landmarks) {
 
   // Lower decorative ridge.
   ctx.beginPath();
-  ctx.moveTo(eyeX - halfWidth * 0.5, lowerY - faceWidth * 0.08);
+
+  ctx.moveTo(
+    eyeX - halfWidth * 0.5,
+    lowerY - faceWidth * 0.08
+  );
 
   ctx.quadraticCurveTo(
     eyeX,
@@ -461,15 +537,24 @@ function friendlyError(error) {
   const name = error?.name || "";
   const message = String(error?.message || "");
 
-  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+  if (
+    name === "NotAllowedError" ||
+    name === "PermissionDeniedError"
+  ) {
     return "Camera permission denied. Allow camera access in your browser or device settings, then retry.";
   }
 
-  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+  if (
+    name === "NotFoundError" ||
+    name === "DevicesNotFoundError"
+  ) {
     return "No compatible camera was found.";
   }
 
-  if (name === "NotReadableError" || name === "TrackStartError") {
+  if (
+    name === "NotReadableError" ||
+    name === "TrackStartError"
+  ) {
     return "The camera is busy. Close other apps using the camera and retry.";
   }
 
@@ -494,6 +579,51 @@ function enqueue(task) {
   return result;
 }
 
+function waitForVideo() {
+  if (
+    video.readyState >= HTMLMediaElement.HAVE_METADATA &&
+    video.videoWidth > 0
+  ) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      video.removeEventListener("loadedmetadata", onReady);
+      video.removeEventListener("error", onError);
+    };
+
+    const finish = (callback, value) => {
+      if (settled) return;
+
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+
+    const onReady = () => {
+      if (video.videoWidth > 0) {
+        finish(resolve);
+      }
+    };
+
+    const onError = () => {
+      finish(
+        reject,
+        new Error("The camera video could not be initialized.")
+      );
+    };
+
+    video.addEventListener("loadedmetadata", onReady);
+    video.addEventListener("error", onError);
+
+    // Avoid a race if metadata arrived just before listener registration.
+    onReady();
+  });
+}
+
 async function startCamera() {
   if (disposed) return;
 
@@ -501,11 +631,14 @@ async function startCamera() {
     if (disposed || stream) return;
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      setStatus("Camera access requires HTTPS or a supported installed app.");
+      setStatus(
+        "Camera access requires HTTPS or a supported installed app."
+      );
       return;
     }
 
     const myGeneration = ++generation;
+
     setControls(true);
     setStatus("Requesting camera access…");
 
@@ -530,7 +663,11 @@ async function startCamera() {
       stream = candidateStream;
 
       for (const track of stream.getVideoTracks()) {
-        track.addEventListener("ended", handleTrackEnded, { once: true });
+        track.addEventListener(
+          "ended",
+          handleTrackEnded,
+          { once: true }
+        );
       }
 
       video.srcObject = stream;
@@ -547,10 +684,15 @@ async function startCamera() {
       if (disposed || myGeneration !== generation || !stream) return;
 
       stage.classList.add("has-camera");
-      if (stageEmpty) stageEmpty.hidden = true;
+
+      if (stageEmpty) {
+        stageEmpty.hidden = true;
+      }
 
       cameraLabel.textContent =
-        facingMode === "user" ? "FRONT CAMERA" : "REAR CAMERA";
+        facingMode === "user"
+          ? "FRONT CAMERA"
+          : "REAR CAMERA";
 
       resizeCanvas();
       resetSmoothing();
@@ -581,45 +723,9 @@ async function startCamera() {
   });
 }
 
-function waitForVideo() {
-  if (video.readyState >= HTMLMediaElement.HAVE_METADATA &&
-      video.videoWidth > 0) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-
-    const cleanup = () => {
-      video.removeEventListener("loadedmetadata", onReady);
-      video.removeEventListener("error", onError);
-    };
-
-    const finish = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      callback(value);
-    };
-
-    const onReady = () => {
-      if (video.videoWidth > 0) finish(resolve);
-    };
-
-    const onError = () => {
-      finish(reject, new Error("The camera video could not be initialized."));
-    };
-
-    video.addEventListener("loadedmetadata", onReady);
-    video.addEventListener("error", onError);
-
-    // Close the race between the initial readiness check and listener setup.
-    onReady();
-  });
-}
-
 function scheduleFrame() {
   if (disposed || !stream || animationId !== null) return;
+
   animationId = requestAnimationFrame(trackFrame);
 }
 
@@ -638,8 +744,10 @@ function trackFrame(timestamp) {
     return;
   }
 
-  if (video.currentTime === lastVideoTime ||
-      timestamp - lastInferenceTime < TARGET_INTERVAL) {
+  if (
+    video.currentTime === lastVideoTime ||
+    timestamp - lastInferenceTime < TARGET_INTERVAL
+  ) {
     scheduleFrame();
     return;
   }
@@ -649,6 +757,7 @@ function trackFrame(timestamp) {
 
   try {
     const result = landmarker.detectForVideo(video, timestamp);
+
     clearCanvas();
 
     const detected = result.faceLandmarks?.[0];
@@ -660,23 +769,33 @@ function trackFrame(timestamp) {
     } else {
       smoothedLandmarks = null;
       setTrackingState(true, false);
-      setStatus("Searching for a face. Move into view and face the camera.");
+      setStatus(
+        "Searching for a face. Move into view and face the camera."
+      );
     }
 
     frameCount++;
 
     if (timestamp - lastFpsTime >= 1000) {
       const elapsed = timestamp - lastFpsTime;
+
       fpsLabel.textContent =
         `${Math.round((frameCount * 1000) / elapsed)} FPS`;
+
       frameCount = 0;
       lastFpsTime = timestamp;
     }
   } catch (error) {
     console.error("MASKAM tracking failed:", error);
+
     clearCanvas();
     setTrackingState(true, false);
-    setStatus("Tracking encountered an error. Stop and restart the camera.");
+
+    setStatus(
+      "Tracking encountered an error. Stop and restart the camera."
+    );
+
+    // Do not repeatedly throw errors every animation frame.
     return;
   }
 
@@ -703,16 +822,23 @@ function cleanupCamera(updateStatus = true) {
 
   video.pause();
   video.srcObject = null;
-  video.style.transform = mirrorToggle.checked ? "scaleX(-1)" : "none";
+
+  video.style.transform = mirrorToggle.checked
+    ? "scaleX(-1)"
+    : "none";
 
   stage.classList.remove("has-camera");
-  if (stageEmpty) stageEmpty.hidden = false;
+
+  if (stageEmpty) {
+    stageEmpty.hidden = false;
+  }
 
   clearCanvas();
   resetSmoothing();
 
   cameraLabel.textContent = "CAMERA OFFLINE";
   fpsLabel.textContent = "-- FPS";
+
   setTrackingState(false, false);
   setControls();
 
@@ -731,22 +857,27 @@ function handleTrackEnded() {
   if (disposed || !stream) return;
 
   cleanupCamera(false);
-  setStatus("The camera disconnected. Enable the camera to try again.");
+
+  setStatus(
+    "The camera disconnected. Enable the camera to try again."
+  );
 }
 
 async function flipCamera() {
   return enqueue(async () => {
     if (!stream || disposed) return;
 
-    const nextFacing = facingMode === "user" ? "environment" : "user";
+    const nextFacing =
+      facingMode === "user" ? "environment" : "user";
 
     cleanupCamera(false);
     facingMode = nextFacing;
 
     setStatus("Switching camera…");
 
-    // Start directly inside this queued operation to avoid nested queue waits.
+    // Start the replacement camera in this queued operation.
     const myGeneration = ++generation;
+
     setControls(true);
 
     let candidateStream = null;
@@ -770,20 +901,36 @@ async function flipCamera() {
       stream = candidateStream;
 
       for (const track of stream.getVideoTracks()) {
-        track.addEventListener("ended", handleTrackEnded, { once: true });
+        track.addEventListener(
+          "ended",
+          handleTrackEnded,
+          { once: true }
+        );
       }
 
       video.srcObject = stream;
+      video.muted = true;
+      video.autoplay = true;
+      video.playsInline = true;
+
       await waitForVideo();
+
+      if (disposed || myGeneration !== generation || !stream) return;
+
       await video.play();
 
       if (disposed || myGeneration !== generation || !stream) return;
 
       stage.classList.add("has-camera");
-      if (stageEmpty) stageEmpty.hidden = true;
+
+      if (stageEmpty) {
+        stageEmpty.hidden = true;
+      }
 
       cameraLabel.textContent =
-        facingMode === "user" ? "FRONT CAMERA" : "REAR CAMERA";
+        facingMode === "user"
+          ? "FRONT CAMERA"
+          : "REAR CAMERA";
 
       resizeCanvas();
       resetSmoothing();
@@ -818,6 +965,7 @@ function setMaskStyle(style) {
 
   document.querySelectorAll(".mask-option").forEach((button) => {
     const selected = button.dataset.mask === style;
+
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
@@ -827,7 +975,9 @@ function openSettings() {
   if (!settingsDialog) return;
 
   if (typeof settingsDialog.showModal === "function") {
-    if (!settingsDialog.open) settingsDialog.showModal();
+    if (!settingsDialog.open) {
+      settingsDialog.showModal();
+    }
   } else {
     settingsDialog.setAttribute("open", "");
   }
@@ -837,12 +987,15 @@ function closeSettings() {
   if (!settingsDialog) return;
 
   if (typeof settingsDialog.close === "function") {
-    if (settingsDialog.open) settingsDialog.close();
+    if (settingsDialog.open) {
+      settingsDialog.close();
+    }
   } else {
     settingsDialog.removeAttribute("open");
   }
 }
 
+// Camera controls.
 startBtn.addEventListener("click", () => {
   startCamera().catch((error) => {
     console.error(error);
@@ -851,7 +1004,9 @@ startBtn.addEventListener("click", () => {
 });
 
 stopBtn.addEventListener("click", () => {
-  stopCamera().catch((error) => console.error(error));
+  stopCamera().catch((error) => {
+    console.error(error);
+  });
 });
 
 flipBtn.addEventListener("click", () => {
@@ -861,27 +1016,38 @@ flipBtn.addEventListener("click", () => {
   });
 });
 
+// Mask style controls.
 document.querySelectorAll(".mask-option").forEach((button) => {
   button.addEventListener("click", () => {
     setMaskStyle(button.dataset.mask);
   });
 });
 
+// Mask opacity.
 opacitySlider.addEventListener("input", () => {
-  maskOpacity = Number(opacitySlider.value) / 100;
-  opacityValue.value = `${opacitySlider.value}%`;
-  opacityValue.textContent = `${opacitySlider.value}%`;
+  const value = Number(opacitySlider.value);
+
+  maskOpacity = Math.min(100, Math.max(0, value)) / 100;
+
+  opacityValue.value = `${value}%`;
+  opacityValue.textContent = `${value}%`;
 });
 
+// Mirror preview and mask coordinates together.
 mirrorToggle.addEventListener("change", () => {
-  video.style.transform = mirrorToggle.checked ? "scaleX(-1)" : "none";
+  video.style.transform = mirrorToggle.checked
+    ? "scaleX(-1)"
+    : "none";
+
   clearCanvas();
 });
 
+// Optional settings controls.
 $("#settingsBtn")?.addEventListener("click", openSettings);
 $("#closeSettingsBtn")?.addEventListener("click", closeSettings);
 $("#doneSettingsBtn")?.addEventListener("click", closeSettings);
 
+// Responsive canvas.
 window.addEventListener("resize", resizeCanvas);
 
 if ("ResizeObserver" in window) {
@@ -889,6 +1055,7 @@ if ("ResizeObserver" in window) {
   resizeObserver.observe(stage);
 }
 
+// Resume cleanly after returning to the app.
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && stream) {
     resetSmoothing();
@@ -896,15 +1063,22 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+// Release camera and model resources when leaving the page.
 window.addEventListener("pagehide", () => {
   disposed = true;
+
   cleanupCamera(false);
   resizeObserver?.disconnect();
+
   landmarker?.close();
   landmarker = null;
+  modelPromise = null;
 });
 
-video.style.transform = mirrorToggle.checked ? "scaleX(-1)" : "none";
+// Initial UI state.
+video.style.transform = mirrorToggle.checked
+  ? "scaleX(-1)"
+  : "none";
 
 document.querySelectorAll(".mask-option").forEach((button) => {
   button.setAttribute(
