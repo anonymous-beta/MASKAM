@@ -1,5 +1,5 @@
 
-name: MASKAM Android APK
+name: Build MASKAM Android APK
 
 on:
   push:
@@ -22,29 +22,42 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Check Android project
-        run: |
-          if [ ! -f android/gradlew ]; then
-            echo "::error::No android/gradlew found. MASKAM needs an Android project before an APK can be built."
-            exit 1
-          fi
-          chmod +x android/gradlew
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build MASKAM web app
+        run: npm run build
+
+      - name: Generate Android project
+        run: npx cap add android
+
+      - name: Sync web app to Android
+        run: npx cap sync android
 
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug
 
-      - name: Upload APK
+      - name: Verify APK
+        run: |
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -s "$APK" ]; then
+            echo "::error::APK was not generated."
+            exit 1
+          fi
+          ls -lh "$APK"
+
+      - name: Upload MASKAM APK
         uses: actions/upload-artifact@v4
         with:
           name: MASKAM-Android-APK
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
