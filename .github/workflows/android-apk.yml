@@ -19,97 +19,182 @@ jobs:
   build:
     name: Build and verify APK
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
-          cache: gradle
+          java-version: '21'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
           cache: npm
+          cache-dependency-path: package-lock.json
 
-      - name: Verify project files
+      - name: Verify required project files
+        shell: bash
         run: |
-          test -s package.json
-          test -s index.html
-          test -s app.js
-          test -s styles.css
-          test -s capacitor.config.json
+          set -euo pipefail
+
+          for file in \
+            package.json \
+            index.html \
+            app.js \
+            styles.css \
+            capacitor.config.json
+          do
+            if [[ ! -s "$file" ]]; then
+              echo "::error::Required file missing or empty: $file"
+              exit 1
+            fi
+          done
+
+          node --version
+          npm --version
+          java -version
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -f package-lock.json ]]; then
+            npm ci --no-audit --no-fund
+          else
+            echo "::warning::package-lock.json is missing; npm install is less reproducible."
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Verify Capacitor dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ls @capacitor/core @capacitor/android @capacitor/cli
+          node --input-type=module -e \
+            "import('./capacitor.config.json', { with: { type: 'json' } }).then(({default:c}) => { if (!c.appId || !c.appName || !c.webDir) process.exit(1); console.log('Capacitor config validated:', c.appId, c.webDir); })"
 
       - name: Build web application
         run: npm run build
 
       - name: Verify web output
+        shell: bash
         run: |
+          set -euo pipefail
+
           test -s dist/index.html
-          test -s dist/app.js
-          test -s dist/styles.css
+
+          echo "Built web assets:"
+          find dist -maxdepth 3 -type f -print
+
+          if ! grep -Eq '<script[^>]+src=' dist/index.html; then
+            echo "::error::No script entry point found in dist/index.html"
+            exit 1
+          fi
+
+          if ! grep -Eq '<link[^>]+stylesheet' dist/index.html; then
+            echo "::warning::No linked stylesheet detected in dist/index.html. Check your Vite entry configuration."
+          fi
 
       - name: Generate Android project
-        run: npx cap add android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -d android ]]; then
+            echo "::error::An android directory already exists. This workflow generates the Android project from scratch; remove this step's generation strategy or commit and maintain the existing native project."
+            exit 1
+          fi
+
+          npx cap add android
 
       - name: Add Android camera permission
+        shell: bash
         run: |
+          set -euo pipefail
+
           python3 - <<'PY'
           from pathlib import Path
           import re
 
           path = Path("android/app/src/main/AndroidManifest.xml")
-          if not path.exists():
+
+          if not path.is_file():
               raise SystemExit("AndroidManifest.xml was not generated.")
 
-          text = path.read_text()
-          permission = (
-              '<uses-permission android:name="android.permission.CAMERA" />'
-          )
+          text = path.read_text(encoding="utf-8")
+          permission = '<uses-permission android:name="android.permission.CAMERA" />'
 
           if "android.permission.CAMERA" not in text:
-              text = re.sub(
+              updated, count = re.subn(
                   r"(<manifest\b[^>]*>)",
                   r"\1\n    " + permission,
                   text,
-                  count=1
+                  count=1,
               )
+              if count != 1:
+                  raise SystemExit("Could not find the manifest root element.")
+              text = updated
 
           if "android.permission.CAMERA" not in text:
-              raise SystemExit("Failed to add CAMERA permission.")
+              raise SystemExit("Camera permission was not added.")
 
-          path.write_text(text)
+          path.write_text(text, encoding="utf-8")
+          print("Camera permission verified.")
           PY
 
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Verify Android manifest
+      - name: Verify Android project
+        shell: bash
         run: |
+          set -euo pipefail
+
+          test -s android/gradlew
+          test -s android/gradle/wrapper/gradle-wrapper.properties
+          test -s android/app/src/main/AndroidManifest.xml
+
           grep -q 'android.permission.CAMERA' \
             android/app/src/main/AndroidManifest.xml
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x android/gradlew
+          chmod +x android/gradlew
+
+      - name: Configure Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/**/*.gradle', 'android/**/*.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Verify APK
+        shell: bash
         run: |
+          set -euo pipefail
+
           APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
+
+          if [[ ! -s "$APK" ]]; then
+            echo "::error::APK was not created at $APK"
+            find android/app/build/outputs -maxdepth 5 -type f -print 2>/dev/null || true
+            exit 1
+          fi
+
           ls -lh "$APK"
+          sha256sum "$APK"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
