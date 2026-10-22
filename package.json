@@ -1,0 +1,26 @@
+
+{
+  "name": "maskam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Privacy-first face-tracked Anonymous-inspired mask by Anonymous-beta",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
+    "@mediapipe/tasks-vision": "^0.10.22",
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "vite": "^6.4.1"
+  }
+}
